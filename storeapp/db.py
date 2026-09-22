@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import sys
 from dataclasses import dataclass
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS records (
     secret     TEXT NOT NULL DEFAULT '',
     url        TEXT NOT NULL DEFAULT '',
     note       TEXT NOT NULL DEFAULT '',
+    tags       TEXT NOT NULL DEFAULT '',
     group_id   INTEGER REFERENCES groups(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -44,6 +46,12 @@ CREATE TABLE IF NOT EXISTS records (
 
 CREATE INDEX IF NOT EXISTS idx_records_group ON records(group_id);
 """
+
+#: 标签分隔符：中英文逗号/分号/顿号
+_TAG_SPLIT = re.compile(r"[,，;；、]+")
+
+#: SQLite LIKE 通配符转义
+_LIKE_SPECIAL = re.compile(r"([\\%_])")
 
 
 def app_data_dir() -> Path:
@@ -65,6 +73,29 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def normalize_tags(text: str) -> str:
+    """把用户输入的标签规整为去重、逗号连接的存储格式。"""
+    seen: set = set()
+    result: list = []
+    for part in _TAG_SPLIT.split(text or ""):
+        tag = part.strip()
+        if tag and tag not in seen:
+            seen.add(tag)
+            result.append(tag)
+    return ",".join(result)
+
+
+def tag_list(tags: str) -> list:
+    """把存储格式的标签还原为列表。"""
+    return [t for t in (tags or "").split(",") if t]
+
+
+def _like_pattern(keyword: str) -> str:
+    """构造大小写不敏感的子串匹配模式，并转义 % _ \\ 字面量。"""
+    escaped = _LIKE_SPECIAL.sub(r"\\\1", keyword.strip())
+    return f"%{escaped}%"
+
+
 @dataclass
 class Group:
     id: int
@@ -80,6 +111,7 @@ class Record:
     secret: str = ""
     url: str = ""
     note: str = ""
+    tags: str = ""
     group_id: Optional[int] = None
     group_name: str = ""
     created_at: str = ""
@@ -93,10 +125,19 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(_SCHEMA)
+        self._migrate()
         self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
+
+    def _migrate(self) -> None:
+        """老版本数据库的结构升级（如 1.0 没有 tags 列）。"""
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(records)")}
+        if "tags" not in columns:
+            self.conn.execute(
+                "ALTER TABLE records ADD COLUMN tags TEXT NOT NULL DEFAULT ''"
+            )
 
     # ------------------------------------------------------------------ 分组
 
@@ -160,30 +201,48 @@ class Database:
             secret=obfuscate.decode(row["secret"]),
             url=row["url"],
             note=row["note"],
+            tags=row["tags"] or "",
             group_id=row["group_id"],
             group_name=row["group_name"] or "",
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
 
-    def records(self, group_id: Optional[int] = None) -> list[Record]:
+    def records(
+        self, group_id: Optional[int] = None, keyword: str = ""
+    ) -> list[Record]:
         """列出记录。
 
-        group_id=None     -> 全部记录
+        group_id=None      -> 全部记录
         group_id=UNGROUPED -> 仅未分组
-        group_id>0        -> 指定分组
+        group_id>0         -> 指定分组
+        keyword 非空       -> 在名称/账号/网址/备注/标签/分组名中做子串搜索
+                               （搜索范围为全部分组，忽略 group_id）
         """
         sql = """
             SELECT r.*, g.name AS group_name
             FROM records r
             LEFT JOIN groups g ON g.id = r.group_id
         """
-        params: tuple = ()
-        if group_id == UNGROUPED:
-            sql += " WHERE r.group_id IS NULL"
+        where: list[str] = []
+        params: list = []
+
+        if keyword.strip():
+            pattern = _like_pattern(keyword)
+            where.append(
+                "(r.name LIKE ? ESCAPE '\\' OR r.username LIKE ? ESCAPE '\\'"
+                " OR r.url LIKE ? ESCAPE '\\' OR r.note LIKE ? ESCAPE '\\'"
+                " OR r.tags LIKE ? ESCAPE '\\' OR g.name LIKE ? ESCAPE '\\')"
+            )
+            params.extend([pattern] * 6)
+        elif group_id == UNGROUPED:
+            where.append("r.group_id IS NULL")
         elif group_id is not None:
-            sql += " WHERE r.group_id = ?"
-            params = (group_id,)
+            where.append("r.group_id = ?")
+            params.append(group_id)
+
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY r.updated_at DESC, r.id DESC"
         rows = self.conn.execute(sql, params).fetchall()
         return [self._row_to_record(r) for r in rows]
@@ -211,6 +270,7 @@ class Database:
         secret: str = "",
         url: str = "",
         note: str = "",
+        tags: str = "",
     ) -> int:
         name = name.strip()
         if not name:
@@ -218,11 +278,14 @@ class Database:
         now = _now()
         cur = self.conn.execute(
             """
-            INSERT INTO records(name, username, secret, url, note, group_id,
+            INSERT INTO records(name, username, secret, url, note, tags, group_id,
                                 created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (name, username, obfuscate.encode(secret), url, note, group_id, now, now),
+            (
+                name, username, obfuscate.encode(secret), url, note,
+                normalize_tags(tags), group_id, now, now,
+            ),
         )
         self.conn.commit()
         return int(cur.lastrowid)
@@ -237,6 +300,7 @@ class Database:
         secret: str = "",
         url: str = "",
         note: str = "",
+        tags: str = "",
     ) -> None:
         name = name.strip()
         if not name:
@@ -244,11 +308,14 @@ class Database:
         cur = self.conn.execute(
             """
             UPDATE records
-            SET name = ?, username = ?, secret = ?, url = ?, note = ?,
+            SET name = ?, username = ?, secret = ?, url = ?, note = ?, tags = ?,
                 group_id = ?, updated_at = ?
             WHERE id = ?
             """,
-            (name, username, obfuscate.encode(secret), url, note, group_id, _now(), record_id),
+            (
+                name, username, obfuscate.encode(secret), url, note,
+                normalize_tags(tags), group_id, _now(), record_id,
+            ),
         )
         if cur.rowcount == 0:
             raise ValueError("记录不存在或已被删除")
@@ -271,3 +338,108 @@ class Database:
                 "SELECT COUNT(*) FROM records WHERE group_id IS NULL"
             ).fetchone()[0]
         )
+
+    # ------------------------------------------------------------- 备份
+
+    def export_data(self) -> dict:
+        """导出全部分组与记录（secret 此处为明文，由 backup 模块加密落盘）。"""
+        records = []
+        for r in self.records():
+            records.append(
+                {
+                    "name": r.name,
+                    "username": r.username,
+                    "secret": r.secret,
+                    "url": r.url,
+                    "note": r.note,
+                    "tags": r.tags,
+                    "group": r.group_name,
+                    "created_at": r.created_at,
+                    "updated_at": r.updated_at,
+                }
+            )
+        return {
+            "app": "StoreApp",
+            "format": 1,
+            "exported_at": _now(),
+            "groups": [g.name for g in self.groups()],
+            "records": records,
+        }
+
+    def apply_import(self, payload: dict, mode: str) -> dict:
+        """导入备份内容。
+
+        mode="merge"   -> 保留现有数据；按 (名称, 账号, 更新时间) 去重后补充
+        mode="replace" -> 清空现有分组与记录，完全替换为备份内容
+        返回统计字典：groups_created / records_added / records_skipped。
+        """
+        if mode not in ("merge", "replace"):
+            raise ValueError("未知的导入方式")
+        raw_groups = payload.get("groups", [])
+        raw_records = payload.get("records", [])
+        if not isinstance(raw_groups, list) or not isinstance(raw_records, list):
+            raise ValueError("备份文件内容格式不正确")
+
+        if mode == "replace":
+            self.conn.execute("DELETE FROM records")
+            self.conn.execute("DELETE FROM groups")
+
+        stats = {"groups_created": 0, "records_added": 0, "records_skipped": 0}
+        name_to_id = {g.name: g.id for g in self.groups()}
+
+        def ensure_group(name) -> Optional[int]:
+            name = (name or "").strip()
+            if not name or name in _RESERVED_GROUP_NAMES:
+                return None
+            if name in name_to_id:
+                return name_to_id[name]
+            cur = self.conn.execute("INSERT INTO groups(name) VALUES (?)", (name,))
+            gid = int(cur.lastrowid)
+            name_to_id[name] = gid
+            stats["groups_created"] += 1
+            return gid
+
+        for group in raw_groups:
+            if isinstance(group, str):
+                ensure_group(group)
+
+        seen: set = set()
+        if mode == "merge":
+            seen = {(r.name, r.username, r.updated_at) for r in self.records()}
+
+        for rec in raw_records:
+            if not isinstance(rec, dict):
+                stats["records_skipped"] += 1
+                continue
+            name = str(rec.get("name") or "").strip()
+            username = str(rec.get("username") or "")
+            created = str(rec.get("created_at") or "") or _now()
+            updated = str(rec.get("updated_at") or "") or created
+            key = (name, username, updated)
+            if not name or key in seen:
+                stats["records_skipped"] += 1
+                continue
+            seen.add(key)
+            group_id = ensure_group(rec.get("group"))
+            self.conn.execute(
+                """
+                INSERT INTO records(name, username, secret, url, note, tags,
+                                    group_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    name,
+                    username,
+                    obfuscate.encode(str(rec.get("secret") or "")),
+                    str(rec.get("url") or ""),
+                    str(rec.get("note") or ""),
+                    normalize_tags(str(rec.get("tags") or "")),
+                    group_id,
+                    created,
+                    updated,
+                ),
+            )
+            stats["records_added"] += 1
+
+        self.conn.commit()
+        return stats

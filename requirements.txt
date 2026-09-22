@@ -1,3 +1,6 @@
-# StoreApp 运行时仅依赖 Python 标准库（tkinter / sqlite3），无第三方依赖。
-# 以下仅在打包 exe 时需要（安装到开发用的 conda 环境即可）：
+# 运行时依赖
+# cryptography：加密备份（导出/导入 .sab）使用；后续的主密码 + AES-GCM 加密同样基于它
+cryptography>=41.0
+
+# 打包工具（仅构建 exe 时需要）
 pyinstaller>=6.0 ; python_version >= "3.8"

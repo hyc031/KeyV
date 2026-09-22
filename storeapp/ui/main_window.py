@@ -3,17 +3,28 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import messagebox, ttk
+from datetime import datetime
+from tkinter import filedialog, messagebox, ttk
 from typing import Optional
 
+from .. import backup
 from ..db import UNGROUPED, Database
-from .dialogs import RecordDialog, ask_group_name
+from .dialogs import (
+    RecordDialog,
+    ask_backup_password,
+    ask_group_name,
+    choose_import_mode,
+)
 
 ALL_LABEL = "全部记录"
 UNG_LABEL = "未分组"
 
 #: 密钥列打码时显示的最长圆点数
 _MASK_MAX = 16
+
+#: 复制到剪贴板后自动清空的秒数
+COPY_CLEAR_SECONDS = 30
+COPY_CLEAR_MS = COPY_CLEAR_SECONDS * 1000
 
 
 class MainWindow:
@@ -23,6 +34,11 @@ class MainWindow:
         #: 当前选中的分组：None=全部，UNGROUPED=未分组，>0=真实分组 ID
         self.selected_group_id: Optional[int] = None
         self.show_secrets = False
+        #: 搜索关键词（非空时跨全部分组搜索）
+        self.keyword = ""
+        #: 剪贴板监护：已复制的值与其自动清空定时器
+        self._clipboard_value: Optional[str] = None
+        self._clipboard_after = None
         #: 列表框索引 -> 分组 ID（前两项固定为 全部/未分组）
         self._group_ids: list[Optional[int]] = []
 
@@ -42,25 +58,35 @@ class MainWindow:
         if "vista" in style.theme_names():
             style.theme_use("vista")
 
-        # 顶部工具栏（记录操作）
+        # 顶部工具栏（记录操作 + 搜索 + 备份）
         bar = ttk.Frame(self.root, padding=(10, 7))
         bar.pack(fill="x")
         self.btn_new = ttk.Button(bar, text="新增记录", command=self.on_new_record)
         self.btn_edit = ttk.Button(bar, text="编辑", command=self.on_edit_record)
         self.btn_delete = ttk.Button(bar, text="删除", command=self.on_delete_record)
+        self.btn_copy = ttk.Button(bar, text="复制密钥", command=self.on_copy_secret)
         self.btn_new.pack(side="left")
         self.btn_edit.pack(side="left", padx=(6, 0))
         self.btn_delete.pack(side="left", padx=(6, 0))
+        self.btn_copy.pack(side="left", padx=(6, 0))
+
+        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
+        ttk.Label(bar, text="搜索:").pack(side="left")
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(bar, textvariable=self.search_var, width=24)
+        self.search_entry.pack(side="left", padx=(6, 0))
+
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
         self.var_show = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             bar, text="显示密钥", variable=self.var_show,
             command=self.on_toggle_secrets,
         ).pack(side="left")
-        ttk.Label(
-            bar, text="双击记录编辑 · Delete 删除 · Ctrl+N 新增",
-            foreground="#666666",
-        ).pack(side="right")
+
+        self.btn_import = ttk.Button(bar, text="导入备份", command=self.on_import_backup)
+        self.btn_export = ttk.Button(bar, text="导出备份", command=self.on_export_backup)
+        self.btn_import.pack(side="right")
+        self.btn_export.pack(side="right", padx=(0, 6))
 
         # 底部状态栏
         self.status = ttk.Label(
@@ -117,16 +143,17 @@ class MainWindow:
 
         table_frame = ttk.Frame(right)
         table_frame.pack(fill="both", expand=True)
-        columns = ("name", "username", "secret", "group", "url", "updated")
+        columns = ("name", "username", "secret", "tags", "group", "url", "updated")
         self.tree = ttk.Treeview(
             table_frame, columns=columns, show="headings", selectmode="browse"
         )
         headings = {
-            "name": ("名称", 180, "w"),
-            "username": ("账号 / 用户名", 150, "w"),
-            "secret": ("密钥 / 密码", 150, "w"),
-            "group": ("分组", 110, "center"),
-            "url": ("网址", 170, "w"),
+            "name": ("名称", 170, "w"),
+            "username": ("账号 / 用户名", 140, "w"),
+            "secret": ("密钥 / 密码", 140, "w"),
+            "tags": ("标签", 130, "w"),
+            "group": ("分组", 100, "center"),
+            "url": ("网址", 160, "w"),
             "updated": ("更新时间", 145, "center"),
         }
         for col, (text, width, anchor) in headings.items():
@@ -148,6 +175,9 @@ class MainWindow:
 
         # 记录右键菜单
         self.menu_records = tk.Menu(self.root, tearoff=0)
+        self.menu_records.add_command(label="复制密钥", command=self.on_copy_secret)
+        self.menu_records.add_command(label="复制账号", command=self.on_copy_account)
+        self.menu_records.add_separator()
         self.menu_records.add_command(label="编辑", command=self.on_edit_record)
         self.menu_records.add_command(label="删除", command=self.on_delete_record)
 
@@ -157,7 +187,11 @@ class MainWindow:
         self.tree.bind("<Return>", lambda _e: self.on_edit_record())
         self.tree.bind("<Delete>", lambda _e: self.on_delete_record())
         self.tree.bind("<Button-3>", self._on_tree_right_click)
+        self.tree.bind("<Control-c>", lambda _e: self.on_copy_secret())
+        self.search_entry.bind("<KeyRelease>", self.on_search_changed)
+        self.search_entry.bind("<Escape>", self._clear_search)
         self.root.bind("<Control-n>", lambda _e: self.on_new_record())
+        self.root.bind("<Control-f>", lambda _e: self.search_entry.focus_set())
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ------------------------------------------------------------- 刷新
@@ -187,7 +221,10 @@ class MainWindow:
         self.refresh_records()
 
     def refresh_records(self) -> None:
-        records = self.db.records(self.selected_group_id)
+        if self.keyword:
+            records = self.db.records(None, keyword=self.keyword)
+        else:
+            records = self.db.records(self.selected_group_id)
         children = self.tree.get_children()
         if children:
             self.tree.delete(*children)
@@ -198,22 +235,27 @@ class MainWindow:
                     r.name,
                     r.username,
                     self._display_secret(r.secret),
+                    r.tags,
                     r.group_name or UNG_LABEL,
                     r.url,
                     r.updated_at,
                 ),
             )
         total = self.db.record_count()
-        if self.selected_group_id is None:
-            where = ALL_LABEL
-        elif self.selected_group_id == UNGROUPED:
-            where = UNG_LABEL
+        if self.keyword:
+            status = (
+                f"搜索「{self.keyword}」找到 {len(records)} 条"
+                f"（范围：全部分组，Esc 清除搜索）   ·   共 {total} 条"
+            )
         else:
-            where = self._current_group_name()
-        self.status.config(
-            text=f"「{where}」显示 {len(records)} 条 / 共 {total} 条"
-            f"   ·   数据文件: {self.db.path}"
-        )
+            if self.selected_group_id is None:
+                where = ALL_LABEL
+            elif self.selected_group_id == UNGROUPED:
+                where = UNG_LABEL
+            else:
+                where = self._current_group_name()
+            status = f"「{where}」显示 {len(records)} 条 / 共 {total} 条"
+        self.status.config(text=f"{status}   ·   数据文件: {self.db.path}")
 
     def _current_group_name(self) -> str:
         for g in self.db.groups():
@@ -300,6 +342,150 @@ class MainWindow:
     def on_toggle_secrets(self) -> None:
         self.show_secrets = self.var_show.get()
         self.refresh_records()
+
+    # ------------------------------------------------------------- 搜索
+
+    def on_search_changed(self, _event=None) -> None:
+        self.keyword = self.search_var.get().strip()
+        self.refresh_records()
+
+    def _clear_search(self, _event=None) -> None:
+        self.search_var.set("")
+        self.on_search_changed()
+
+    # ------------------------------------------------------------- 复制
+
+    def on_copy_secret(self) -> None:
+        self._copy_field("secret", "密钥")
+
+    def on_copy_account(self) -> None:
+        self._copy_field("username", "账号")
+
+    def _copy_field(self, field: str, label: str) -> None:
+        record_id = self._selected_record_id()
+        if record_id is None:
+            messagebox.showinfo("提示", "请先在列表中选择一条记录", parent=self.root)
+            return
+        try:
+            record = self.db.get_record(record_id)
+        except ValueError as exc:
+            messagebox.showwarning("提示", str(exc), parent=self.root)
+            self.refresh_groups()
+            return
+        value = getattr(record, field, "") or ""
+        if not value:
+            messagebox.showinfo(
+                "提示", f"「{record.name}」没有{label}", parent=self.root
+            )
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(value)
+        self.root.update()  # 立即写入系统剪贴板，确保其他窗口可用
+        self._clipboard_value = value
+        if self._clipboard_after is not None:
+            self.root.after_cancel(self._clipboard_after)
+        self._clipboard_after = self.root.after(COPY_CLEAR_MS, self._clear_clipboard)
+        self.status.config(
+            text=f"已复制「{record.name}」的{label}，{COPY_CLEAR_SECONDS} 秒后自动清空剪贴板"
+        )
+
+    def _clear_clipboard(self) -> None:
+        """定时清空剪贴板；若用户已复制了别的内容则不动它。"""
+        self._clipboard_after = None
+        value, self._clipboard_value = self._clipboard_value, None
+        if value is None:
+            return
+        try:
+            current = self.root.clipboard_get()
+        except tk.TclError:
+            return  # 剪贴板已不是文本（如图片），不碰用户的内容
+        if current == value:
+            self.root.clipboard_clear()
+            self.root.update()
+            self.status.config(text="剪贴板已自动清空")
+
+    # ------------------------------------------------------------- 备份
+
+    def on_export_backup(self) -> None:
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="导出加密备份",
+            defaultextension=backup.FILE_EXTENSION,
+            initialfile=(
+                f"StoreApp-backup-{datetime.now():%Y%m%d-%H%M%S}"
+                f"{backup.FILE_EXTENSION}"
+            ),
+            filetypes=backup.FILE_TYPES,
+        )
+        if not path:
+            return
+        password = ask_backup_password(
+            self.root,
+            "设置备份密码",
+            "该密码用于加密备份文件，不会被保存在任何地方；\n"
+            "遗忘后将无法恢复此备份。",
+            confirm=True,
+        )
+        if not password:
+            return
+        payload = self.db.export_data()
+        try:
+            backup.export_file(path, password, payload)
+        except Exception as exc:
+            messagebox.showerror(
+                "导出失败", f"写入备份文件失败：{exc}", parent=self.root
+            )
+            return
+        messagebox.showinfo(
+            "导出成功",
+            f"已导出 {len(payload['groups'])} 个分组、"
+            f"{len(payload['records'])} 条记录到：\n{path}",
+            parent=self.root,
+        )
+
+    def on_import_backup(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self.root,
+            title="选择备份文件",
+            filetypes=backup.FILE_TYPES,
+        )
+        if not path:
+            return
+        password = ask_backup_password(
+            self.root,
+            "输入备份密码",
+            "输入导出该备份时设置的密码。",
+            confirm=False,
+        )
+        if not password:
+            return
+        try:
+            payload = backup.load_file(path, password)
+        except backup.BackupError as exc:
+            messagebox.showerror("导入失败", str(exc), parent=self.root)
+            return
+        summary = (
+            f"备份包含 {len(payload.get('groups', []))} 个分组、"
+            f"{len(payload['records'])} 条记录\n"
+            f"导出时间：{payload.get('exported_at', '未知')}\n\n"
+            "请选择导入方式："
+        )
+        mode = choose_import_mode(self.root, summary)
+        if not mode:
+            return
+        try:
+            stats = self.db.apply_import(payload, mode)
+        except ValueError as exc:
+            messagebox.showerror("导入失败", str(exc), parent=self.root)
+            return
+        self.refresh_groups()
+        messagebox.showinfo(
+            "导入完成",
+            f"新增 {stats['records_added']} 条记录，"
+            f"跳过重复 {stats['records_skipped']} 条，"
+            f"新建分组 {stats['groups_created']} 个",
+            parent=self.root,
+        )
 
     def _selected_record_id(self) -> Optional[int]:
         selection = self.tree.selection()
@@ -398,6 +584,18 @@ class MainWindow:
     # ------------------------------------------------------------- 其他
 
     def _on_close(self) -> None:
+        # 关闭前清掉我们复制到剪贴板的密钥，避免残留
+        if self._clipboard_after is not None:
+            self.root.after_cancel(self._clipboard_after)
+            self._clipboard_after = None
+        if self._clipboard_value is not None:
+            try:
+                if self.root.clipboard_get() == self._clipboard_value:
+                    self.root.clipboard_clear()
+                    self.root.update()
+            except tk.TclError:
+                pass
+            self._clipboard_value = None
         self.db.close()
         self.root.destroy()
 
