@@ -88,8 +88,8 @@ git push -u origin main
 
 | # | 规划项 | 状态 |
 | --- | --- | --- |
-| 1 | 主密码 + AES-GCM 加密（仅 secret 字段，其余字段明文） | 📝 **方案已出，待评审**：[docs/master-password-design.md](docs/master-password-design.md) |
+| 1 | 主密码 + AES-GCM 加密（仅 secret 字段） | ⏸ **暂不实施**：以简单易用优先，保持"打开即用"；方案文档留作日后参考 [docs/master-password-design.md](docs/master-password-design.md) |
 | 2 | 一键复制 + 自动清空剪贴板 | ✅ v1.1 |
 | 3 | 搜索与标签 | ✅ v1.1 |
 | 4 | 加密备份的导入/导出 | ✅ v1.1 |
-| 5 | 空闲自动锁定 + 手动锁库 | ⏳ 暂缓（依赖第 1 项，待加密方案确认后随 v2.x 实现） |
+| 5 | 空闲自动锁定 + 手动锁库 | ⏸ 随第 1 项一并搁置 |
