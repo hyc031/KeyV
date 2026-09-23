@@ -127,3 +127,7 @@ KeyV/
 | 加密 | [cryptography](https://cryptography.io/)：PBKDF2-HMAC-SHA256（200,000 轮）+ AES-256-GCM |
 | 剪贴板 | Win32 API（`ctypes`），复制后 30 秒自动清空 |
 | 打包 | [PyInstaller](https://pyinstaller.org/)（单文件、无控制台） |
+
+## 📄 License
+
+本项目以 [MIT License](LICENSE) 开源（Copyright © 2026 hyc031）。

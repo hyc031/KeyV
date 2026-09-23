@@ -127,3 +127,7 @@ KeyV/
 | Crypto | [cryptography](https://cryptography.io/): PBKDF2-HMAC-SHA256 (200,000 rounds) + AES-256-GCM |
 | Clipboard | Win32 API via `ctypes`, cleared 30 seconds after copying |
 | Packaging | [PyInstaller](https://pyinstaller.org/) (single file, no console) |
+
+## 📄 License
+
+This project is open source under the [MIT License](LICENSE) (Copyright © 2026 hyc031).
