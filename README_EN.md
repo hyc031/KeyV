@@ -11,7 +11,7 @@ A local-first, fully offline desktop vault for your API keys, passwords, and ser
 ![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=flat&logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D4?style=flat)
 ![Offline](https://img.shields.io/badge/offline-100%25-44CC11?style=flat)
-![Version](https://img.shields.io/badge/version-1.2.0--beta.1-6366F1?style=flat)
+![Version](https://img.shields.io/badge/version-1.2.0--beta.2-6366F1?style=flat)
 
 </div>
 
