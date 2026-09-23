@@ -90,6 +90,10 @@ The database currently uses **plaintext with lightweight obfuscation** by design
 - Therefore, **never upload the `data/` directory to any repository or cloud drive**
 - Conversely, `.sab` backups are real encryption (AES-256-GCM); with a strong password they are safe to copy to a USB drive or cloud storage
 
+## ⚠️ Disclaimer
+
+> This software is provided as is. The author shall not be held responsible for any key leakage or other issues arising from the use of this software.
+
 ## 🗂 Project Structure
 
 ```
