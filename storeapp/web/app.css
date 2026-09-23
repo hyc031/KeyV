@@ -257,7 +257,7 @@ button { font-family: inherit; }
 
 /* ---------------------------------------------------------------- 卡片 */
 
-.record-list { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-bottom: 20px; }
+.record-list { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-bottom: 20px; }
 
 .card {
   background: var(--card);
@@ -384,6 +384,9 @@ button { font-family: inherit; }
 }
 
 /* ---------------------------------------------------------------- 空状态 */
+
+/* hidden 属性需覆盖上方 display:flex（作者样式优先于浏览器默认 [hidden] 样式） */
+.empty[hidden], .record-list[hidden] { display: none; }
 
 .empty {
   flex: 1;

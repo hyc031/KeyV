@@ -196,7 +196,7 @@ function renderToolbar() {
 function cardHtml(record) {
   const group = groupOf(record);
   const groupName = group ? group.name : '未分组';
-  const letter = groupName.trim().charAt(0) || '?';
+  const letter = (record.name.trim().charAt(0) || '?').toUpperCase();
   const color = colorFor(groupName);
   const visible = isSecretVisible(record);
 
@@ -243,6 +243,7 @@ function renderList() {
 
   if (!records.length) {
     listEl.innerHTML = '';
+    listEl.hidden = true;
     emptyEl.hidden = false;
     if (state.keyword.trim()) {
       emptyEl.innerHTML = `${ICON.searchBig(56)}
@@ -258,6 +259,7 @@ function renderList() {
   }
 
   emptyEl.hidden = true;
+  listEl.hidden = false;
   listEl.innerHTML = records.map(cardHtml).join('');
 }
 
@@ -797,6 +799,7 @@ async function init() {
   bindEvents();
   const res = await call('bootstrap');
   if (!res.ok) {
+    document.getElementById('record-list').hidden = true;
     document.getElementById('empty').hidden = false;
     document.getElementById('empty').innerHTML =
       `${ICON.key(56)}<h3>无法加载数据</h3><p>${esc(res.error || '本地服务未就绪')}</p>`;
