@@ -31,7 +31,7 @@
 **环境要求**：Windows 10 / 11（自带 Edge WebView2 运行时）· Python 3.8+
 
 ```bash
-git clone https://github.com/<你的用户名>/KeyV.git
+git clone 
 cd KeyV
 pip install -r requirements.txt
 python main.py

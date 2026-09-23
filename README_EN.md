@@ -31,7 +31,7 @@ A local-first, fully offline desktop vault for your API keys, passwords, and ser
 **Requirements**: Windows 10 / 11 (Edge WebView2 runtime is preinstalled) · Python 3.8+
 
 ```bash
-git clone https://github.com/<username>/KeyV.git
+git clone 
 cd KeyV
 pip install -r requirements.txt
 python main.py
