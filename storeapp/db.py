@@ -121,7 +121,10 @@ class Record:
 class Database:
     def __init__(self, path: Optional[Path] = None):
         self.path = Path(path) if path is not None else default_db_path()
-        self.conn = sqlite3.connect(self.path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # check_same_thread=False：pywebview 的 API 调用发生在其他线程，
+        # 统一由 Api 层的锁保证串行访问
+        self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(_SCHEMA)

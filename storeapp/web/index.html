@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StoreApp · 密钥与密码本地存储</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app">
+    <!-- 顶栏 56px -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="7.5" cy="15.5" r="4.5"/>
+            <path d="m21 2-9.6 9.6"/>
+            <path d="m15.5 7.5 3 3L22 7l-3-3"/>
+          </svg>
+        </span>
+        <span class="brand-name">StoreApp</span>
+      </div>
+
+      <div class="topbar-right">
+        <div class="search">
+          <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+          </svg>
+          <input id="search" type="text" placeholder="搜索名称、账号、标签…" spellcheck="false" autocomplete="off">
+          <kbd id="search-kbd">Ctrl K</kbd>
+        </div>
+
+        <div class="dropdown-wrap">
+          <button class="icon-btn" id="gear-btn" title="设置" aria-label="设置">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
+          <div class="dropdown" id="settings-menu" hidden>
+            <div class="dd-item dd-toggle" id="show-secrets-item">
+              <span>显示密钥</span>
+              <span class="switch" id="show-secrets-switch"><span class="knob"></span></span>
+            </div>
+            <div class="dd-divider"></div>
+            <button class="dd-item" id="export-item">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v12"/></svg>
+              导出加密备份…
+            </button>
+            <button class="dd-item" id="import-item">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+              导入备份…
+            </button>
+            <div class="dd-divider"></div>
+            <div class="dd-footer">
+              <div id="dd-version">StoreApp</div>
+              <div id="dd-path" class="dd-path" title=""></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- 左侧 220px 边栏 -->
+      <aside class="sidebar">
+        <nav class="group-list" id="group-list"></nav>
+        <button class="add-group-btn" id="add-group-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+          新增分组
+        </button>
+      </aside>
+
+      <!-- 右侧主内容 -->
+      <main class="main">
+        <div class="toolbar">
+          <div class="toolbar-title">
+            <h1 id="view-title">全部记录</h1>
+            <span class="view-count" id="view-count"></span>
+          </div>
+          <div class="toolbar-actions">
+            <button class="btn btn-ghost" id="edit-btn" disabled>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></svg>
+              编辑
+            </button>
+            <button class="btn btn-ghost" id="delete-btn" disabled>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+              删除
+            </button>
+            <button class="btn btn-primary" id="new-btn">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+              新增记录
+            </button>
+          </div>
+        </div>
+
+        <div class="record-list" id="record-list"></div>
+        <div class="empty" id="empty" hidden></div>
+      </main>
+    </div>
+  </div>
+
+  <div id="modal-root"></div>
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
